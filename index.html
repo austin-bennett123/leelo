@@ -96,6 +96,7 @@
         <div class="flex items-baseline gap-2">
           <span id="drawerWord" class="font-bold text-sky-400 text-base capitalize"></span>
         </div>
+        <p id="drawerVerbInfo" class="hidden text-xs text-slate-400 mt-0.5"></p>
         <p id="drawerMeaning" class="text-sm text-slate-200 mt-0.5 font-medium"></p>
       </div>
       <div class="flex shrink-0 items-center gap-1">
@@ -292,14 +293,26 @@
 
       const foundMeaning = Object.entries(currentStory.vocabulary || {})
         .find(([key]) => key.toLowerCase() === cleanWord)?.[1];
-      const savedMeaning = vocabBank.find(item => item.word.toLowerCase() === cleanWord)?.meaning;
-      const meaning = foundMeaning || (savedMeaning === "Toca para guardar y repasar" ? '' : savedMeaning) || '';
+      const savedWord = vocabBank.find(item => item.word.toLowerCase() === cleanWord);
+      const savedMeaning = savedWord?.meaning;
+      const meaning = getTranslationMeaning(foundMeaning) ||
+        (savedMeaning === "Toca para guardar y repasar" ? '' : getTranslationMeaning(savedMeaning)) || '';
+      const wordDetails = foundMeaning && typeof foundMeaning === 'object' ? foundMeaning : { ...savedWord };
+      if (!wordDetails.infinitive && typeof foundMeaning === 'string') {
+        const glossaryInfinitive = foundMeaning.match(/\(([a-záéíóúñü]+(?:ar|er|ir))\)\s*$/i)?.[1];
+        if (glossaryInfinitive) {
+          wordDetails.infinitive = glossaryInfinitive;
+          wordDetails.form = originalToken;
+        }
+      }
       const requestId = ++translationRequestId;
 
       if (meaning) {
         setDrawerTranslation(meaning);
+        setDrawerVerbInfo(wordDetails);
       } else {
         setDrawerTranslation('');
+        setDrawerVerbInfo({});
         meaningEl.innerText = "Buscando traducción...";
       }
 
@@ -318,7 +331,8 @@
           if (requestId !== translationRequestId || selectedToken?.clean !== cleanWord) return;
           currentStory.vocabulary ||= {};
           currentStory.vocabulary[cleanWord] = translatedMeaning;
-          setDrawerTranslation(translatedMeaning);
+          setDrawerTranslation(translatedMeaning.meaning);
+          setDrawerVerbInfo(translatedMeaning);
           positionTranslationDrawer(anchor);
         } catch (error) {
           console.error("Word translation error:", error);
@@ -335,6 +349,21 @@
       meaningEl.innerText = meaning;
     }
 
+    function getTranslationMeaning(entry) {
+      if (typeof entry === 'string') return entry;
+      return typeof entry?.meaning === 'string' ? entry.meaning : '';
+    }
+
+    function setDrawerVerbInfo(details) {
+      const verbInfo = document.getElementById('drawerVerbInfo');
+      const infinitive = details?.infinitive?.trim();
+      const form = details?.form?.trim();
+      verbInfo.innerText = infinitive
+        ? `${form ? `${form} · ` : ''}Infinitivo: ${infinitive}`
+        : '';
+      verbInfo.classList.toggle('hidden', !infinitive);
+    }
+
     async function translateWord(word, sentence) {
       const apiKey = localStorage.getItem('gemini_api_key');
 
@@ -344,15 +373,27 @@
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
-              contents: [{ parts: [{ text: `Translate the Spanish word "${word}" into concise English. Use this sentence for context: "${sentence}". Return only the English translation, with no explanation or quotation marks.` }] }]
+              contents: [{ parts: [{ text: `Analyze the Spanish word "${word}" as it is used in this sentence: "${sentence}".
+Return only valid JSON with these fields:
+{"meaning":"concise English meaning in this sentence","infinitive":"Spanish infinitive if the word is a verb, otherwise empty string","form":"conjugated form and tense/person if it is a verb, otherwise empty string"}
+For a conjugated verb, translate the conjugated meaning in context and identify both the exact form and infinitive. Do not label nouns or adjectives as verbs.` }] }],
+              generationConfig: { responseMimeType: "application/json" }
             })
           });
           const data = await response.json();
           if (!response.ok) throw new Error(data.error?.message || 'No se pudo traducir la palabra');
 
-          const translation = data.candidates?.[0]?.content?.parts?.[0]?.text?.trim();
-          if (!translation) throw new Error('La respuesta de Gemini no contiene una traducción');
-          return translation.replace(/^["']|["']$/g, '');
+          const rawAnalysis = data.candidates?.[0]?.content?.parts?.[0]?.text?.trim();
+          if (!rawAnalysis) throw new Error('La respuesta de Gemini no contiene una traducción');
+          const analysis = JSON.parse(rawAnalysis);
+          if (typeof analysis.meaning !== 'string' || !analysis.meaning.trim()) {
+            throw new Error('Gemini no devolvió un significado válido');
+          }
+          return {
+            meaning: analysis.meaning.trim(),
+            infinitive: typeof analysis.infinitive === 'string' ? analysis.infinitive.trim() : '',
+            form: typeof analysis.form === 'string' ? analysis.form.trim() : ''
+          };
         } catch (error) {
           console.warn("Gemini translation failed; trying the free translation service:", error);
         }
@@ -366,7 +407,7 @@
 
       const translation = data.responseData?.translatedText?.trim();
       if (!translation) throw new Error('El servicio no devolvió una traducción');
-      return translation;
+      return { meaning: translation, infinitive: '', form: '' };
     }
 
     function positionTranslationDrawer(anchor = selectedToken?.anchor) {
@@ -408,6 +449,8 @@
         vocabBank.push({
           word: savedToken.display,
           meaning: document.getElementById('drawerMeaning').dataset.translation || '',
+          infinitive: document.getElementById('drawerVerbInfo').innerText.match(/Infinitivo: (.+)$/)?.[1] || '',
+          form: document.getElementById('drawerVerbInfo').innerText.split(' · ')[0] || '',
           date: new Date().toLocaleDateString()
         });
       }
@@ -563,7 +606,14 @@ Respond strictly in valid JSON matching this exact structure:
           const meaning = document.createElement('p');
           meaning.className = "text-slate-300";
           meaning.innerText = item.meaning || "Sin traducción";
-          details.append(word, meaning);
+          details.append(word);
+          if (item.infinitive) {
+            const form = document.createElement('p');
+            form.className = "text-slate-400";
+            form.innerText = `${item.form ? `${item.form} · ` : ''}Infinitivo: ${item.infinitive}`;
+            details.append(form);
+          }
+          details.append(meaning);
 
           const remove = document.createElement('button');
           remove.type = 'button';
