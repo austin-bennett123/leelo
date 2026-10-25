@@ -1,1 +1,455 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>Léelo - Microcuentos en Español</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700&family=Lora:ital,wght@0,400;0,600;1,400&display=swap" rel="stylesheet">
+  <style>
+    body { font-family: 'Plus Jakarta Sans', sans-serif; background-color: #0f172a; color: #f8fafc; }
+    .story-font { font-family: 'Lora', Georgia, serif; }
+    .word-token {
+      display: inline-block;
+      cursor: pointer;
+      padding: 1px 3px;
+      border-radius: 4px;
+      transition: all 0.15s ease;
+    }
+    .word-token:hover, .word-token:active {
+      background-color: #334155;
+      color: #38bdf8;
+    }
+    .word-saved {
+      text-decoration: underline wavy #38bdf8 1.5px;
+      text-underline-offset: 4px;
+    }
+  </style>
+</head>
+<body class="min-h-screen flex flex-col items-center justify-between p-4 selection:bg-sky-500 selection:text-white">
+
+  <header class="w-full max-w-md flex items-center justify-between py-2 border-b border-slate-800">
+    <div class="flex items-center gap-2">
+      <span class="text-2xl" aria-hidden="true">⚡</span>
+      <h1 class="text-xl font-bold tracking-tight text-white">Léelo</h1>
+      <span id="streakBadge" class="ml-2 px-2 py-0.5 text-xs bg-amber-500/10 text-amber-400 font-semibold rounded-full border border-amber-500/20">
+        🔥 <span id="streakCount">1</span>
+      </span>
+    </div>
+    <div class="flex items-center gap-2">
+      <button type="button" onclick="openVocabModal()" class="px-2.5 py-1 text-xs font-semibold rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700">
+        Vocab (<span id="vocabCount">0</span>)
+      </button>
+      <button type="button" onclick="openSettingsModal()" aria-label="Configuración" title="Configuración" class="p-1.5 text-slate-400 hover:text-white rounded-lg bg-slate-800/60">
+        ⚙️
+      </button>
+    </div>
+  </header>
+
+  <div class="w-full max-w-md flex gap-2 my-3">
+    <select id="levelSelect" aria-label="Nivel de español" class="flex-1 bg-slate-800 border border-slate-700 text-slate-200 text-xs rounded-xl px-3 py-2 outline-none">
+      <option value="A1-A2" selected>Nivel: Principiante (A1-A2)</option>
+      <option value="B1-B2">Nivel: Intermedio (B1-B2)</option>
+    </select>
+    <select id="genreSelect" aria-label="Género de la historia" class="flex-1 bg-slate-800 border border-slate-700 text-slate-200 text-xs rounded-xl px-3 py-2 outline-none">
+      <option value="Vida Diaria">Vida Diaria</option>
+      <option value="Misterio">Misterio</option>
+      <option value="Ciencia Ficción">Ciencia Ficción</option>
+      <option value="Comedia">Comedia</option>
+    </select>
+  </div>
+
+  <main class="w-full max-w-md bg-slate-900 border border-slate-800/80 rounded-2xl p-5 shadow-2xl flex-1 flex flex-col justify-between relative overflow-hidden">
+    <div class="flex justify-between items-center text-xs text-slate-400 mb-3">
+      <span id="readTimeTag" class="flex items-center gap-1 font-medium text-slate-400">⏱️ ~60 seg</span>
+      <span id="sourceTag" class="text-[11px] px-2 py-0.5 rounded-full bg-slate-800 text-slate-400 font-medium">Offline</span>
+    </div>
+
+    <div class="flex-1 flex flex-col justify-start">
+      <h2 id="storyTitle" class="text-xl font-bold text-slate-100 mb-3 leading-snug">Cargando...</h2>
+      <div id="storyContent" class="story-font text-[17px] text-slate-300 leading-relaxed space-y-3"></div>
+    </div>
+
+    <div id="questionBox" class="mt-4 pt-3 border-t border-slate-800 hidden" aria-live="polite">
+      <p id="questionPrompt" class="text-xs font-semibold text-slate-300 mb-2"></p>
+      <div id="questionOptions" class="grid grid-cols-1 gap-1.5"></div>
+      <div id="questionFeedback" class="text-xs mt-1.5 font-medium hidden"></div>
+    </div>
+
+    <div id="translationDrawer" class="hidden mt-4 p-3 bg-slate-800/90 border border-sky-500/30 rounded-xl flex items-center justify-between" aria-live="polite">
+      <div>
+        <div class="flex items-baseline gap-2">
+          <span id="drawerWord" class="font-bold text-sky-400 text-base capitalize"></span>
+          <span id="drawerRoot" class="text-xs text-slate-400 italic"></span>
+        </div>
+        <p id="drawerMeaning" class="text-sm text-slate-200 mt-0.5 font-medium"></p>
+      </div>
+      <button type="button" id="saveWordBtn" onclick="toggleSaveCurrentWord()" class="px-3 py-1.5 rounded-lg bg-sky-500 hover:bg-sky-400 text-slate-950 font-bold text-xs">
+        + Guardar
+      </button>
+    </div>
+  </main>
+
+  <footer class="w-full max-w-md pt-3 flex gap-2">
+    <button type="button" id="nextStoryBtn" onclick="handleNextStory()" class="flex-1 py-3.5 px-4 rounded-xl bg-sky-500 hover:bg-sky-400 active:scale-[0.98] transition-all text-slate-950 font-bold text-base shadow-lg shadow-sky-500/20 flex items-center justify-center gap-2">
+      <span id="btnText">Siguiente Historia ➔</span>
+    </button>
+  </footer>
+
+  <div id="vocabModal" class="fixed inset-0 bg-slate-950/80 backdrop-blur-sm z-50 hidden items-center justify-center p-4" role="dialog" aria-modal="true" aria-labelledby="vocabTitle">
+    <div class="bg-slate-900 border border-slate-800 rounded-2xl max-w-sm w-full p-5 max-h-[80vh] flex flex-col">
+      <div class="flex justify-between items-center mb-3">
+        <h3 id="vocabTitle" class="font-bold text-lg text-white">Mi Banco de Palabras</h3>
+        <button type="button" onclick="closeVocabModal()" aria-label="Cerrar" class="text-slate-400 hover:text-white text-lg">✕</button>
+      </div>
+      <p class="text-xs text-slate-400 mb-3">Las historias generadas con IA intentarán incluir estas palabras automáticamente.</p>
+      <div id="vocabList" class="flex-1 overflow-y-auto space-y-2 pr-1"></div>
+    </div>
+  </div>
+
+  <div id="settingsModal" class="fixed inset-0 bg-slate-950/80 backdrop-blur-sm z-50 hidden items-center justify-center p-4" role="dialog" aria-modal="true" aria-labelledby="settingsTitle">
+    <div class="bg-slate-900 border border-slate-800 rounded-2xl max-w-sm w-full p-5">
+      <h3 id="settingsTitle" class="font-bold text-lg text-white mb-2">Configuración de Gemini</h3>
+      <p class="text-xs text-slate-400 mb-4 leading-relaxed">
+        Pega tu API Key gratuita de <strong>Google AI Studio</strong> para historias ilimitadas generadas por IA que usen tus palabras guardadas. Si no tienes una, la app usará cuentos guardados offline.
+      </p>
+      <input type="password" id="apiKeyInput" placeholder="AIzaSy..." autocomplete="off" class="w-full bg-slate-800 border border-slate-700 rounded-xl px-3 py-2 text-sm text-slate-100 outline-none mb-4 focus:border-sky-500">
+      <div class="flex justify-end gap-2">
+        <button type="button" onclick="closeSettingsModal()" class="px-3 py-2 text-xs font-semibold rounded-lg bg-slate-800 text-slate-300">Cerrar</button>
+        <button type="button" onclick="saveApiKey()" class="px-4 py-2 text-xs font-bold rounded-lg bg-sky-500 text-slate-950">Guardar Clave</button>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const offlineLibrary = [
+      {
+        title: "El Café Misterioso",
+        text: "Cada mañana, Sofía compra un café en la pequeña plaza del barrio. Siempre pide café solo con una gota de leche. Hoy, el camarero le entrega una taza azul con un sobre sellado al lado. Sofía abre el sobre con curiosidad. Dentro hay una foto antigua de su propia casa con una palabra escrita detrás: 'Busca'. Sofía sonríe emocionada y decide investigar antes de ir a su trabajo.",
+        vocabulary: {
+          "plaza": "square / plaza",
+          "gota": "drop",
+          "camarero": "waiter",
+          "entrega": "delivers / hands over (entregar)",
+          "sellado": "sealed",
+          "curiosidad": "curiosity",
+          "antigua": "old / antique",
+          "sonríe": "smiles (sonreír)",
+          "investigar": "to investigate"
+        },
+        question: {
+          prompt: "¿Qué encontró Sofía al lado de su taza de café?",
+          options: ["Una llave vieja", "Un sobre sellado", "Un libro de historia"],
+          correctIndex: 1
+        }
+      },
+      {
+        title: "La Llave del Relojero",
+        text: "Mateo encontró una llave pequeña y dorada debajo del banco del parque. Tenía una forma extraña, parecida a un sol diminuto. Decidió llevarla a la vieja tienda de relojes del señor Ramón. Cuando el anciano vio la llave, abrió los ojos con asombro y sacó una caja de madera antigua. La llave encajaba perfectamente en la cerradura.",
+        vocabulary: {
+          "encontró": "found (encontrar)",
+          "llave": "key",
+          "dorada": "golden",
+          "debajo": "underneath",
+          "extraña": "strange",
+          "anciano": "elderly man",
+          "asombro": "astonishment / surprise",
+          "encajaba": "fitted (encajar)",
+          "cerradura": "lock"
+        },
+        question: {
+          prompt: "¿A quién le llevó Mateo la llave dorada?",
+          options: ["A la policía", "Al relojero señor Ramón", "A su hermano mayor"],
+          correctIndex: 1
+        }
+      }
+    ];
+
+    let currentStory = null;
+    let selectedToken = null;
+    let vocabBank = readJson('leelo_vocab', []);
+    let currentOfflineIndex = 0;
+
+    function readJson(key, fallback) {
+      try {
+        return JSON.parse(localStorage.getItem(key)) || fallback;
+      } catch (error) {
+        return fallback;
+      }
+    }
+
+    window.addEventListener('DOMContentLoaded', () => {
+      updateVocabBadge();
+      loadStory(offlineLibrary[0], "Offline");
+    });
+
+    function loadStory(story, source = "Offline") {
+      currentStory = story;
+      document.getElementById('storyTitle').innerText = story.title;
+      document.getElementById('sourceTag').innerText = source;
+      document.getElementById('translationDrawer').classList.add('hidden');
+
+      const wordCount = story.text.split(/\s+/).length;
+      document.getElementById('readTimeTag').innerText = `⏱️ ~${Math.max(30, Math.round(wordCount / 2))} seg`;
+
+      const contentEl = document.getElementById('storyContent');
+      contentEl.replaceChildren();
+
+      story.text.split(/(?<=[.?!])\s+/).forEach(sentence => {
+        const paragraph = document.createElement('p');
+        sentence.split(/(\s+|[.,!?;:(")])/).forEach(token => {
+          if (!token.trim() || /^[.,!?;:(")]+$/.test(token)) {
+            paragraph.appendChild(document.createTextNode(token));
+            return;
+          }
+
+          const span = document.createElement('span');
+          span.className = 'word-token';
+          span.innerText = token;
+          span.tabIndex = 0;
+          span.setAttribute('role', 'button');
+          const cleanWord = token.toLowerCase().replace(/[^a-záéíóúñü]/g, '');
+
+          if (vocabBank.some(item => item.word.toLowerCase() === cleanWord)) {
+            span.classList.add('word-saved');
+          }
+
+          const openWord = () => handleWordClick(cleanWord, token);
+          span.onclick = openWord;
+          span.onkeydown = event => {
+            if (event.key === 'Enter' || event.key === ' ') {
+              event.preventDefault();
+              openWord();
+            }
+          };
+          paragraph.appendChild(span);
+        });
+        contentEl.appendChild(paragraph);
+      });
+
+      renderQuestion(story.question);
+    }
+
+    function renderQuestion(question) {
+      const questionBox = document.getElementById('questionBox');
+      const feedback = document.getElementById('questionFeedback');
+      const options = document.getElementById('questionOptions');
+
+      if (!question || !Array.isArray(question.options)) {
+        questionBox.classList.add('hidden');
+        return;
+      }
+
+      questionBox.classList.remove('hidden');
+      feedback.classList.add('hidden');
+      document.getElementById('questionPrompt').innerText = question.prompt;
+      options.replaceChildren();
+
+      question.options.forEach((option, index) => {
+        const button = document.createElement('button');
+        button.type = 'button';
+        button.className = "text-left text-xs p-2 rounded-lg bg-slate-800/80 hover:bg-slate-700 text-slate-200 border border-slate-700/60 transition-all";
+        button.innerText = option;
+        button.onclick = () => {
+          const correct = index === question.correctIndex;
+          feedback.innerText = correct ? "¡Correcto! Excelente comprensión." : "Inténtalo de nuevo.";
+          feedback.className = correct
+            ? "text-xs mt-1.5 font-bold text-emerald-400"
+            : "text-xs mt-1.5 font-bold text-amber-400";
+          feedback.classList.remove('hidden');
+        };
+        options.appendChild(button);
+      });
+    }
+
+    function handleWordClick(cleanWord, originalToken) {
+      selectedToken = { clean: cleanWord, display: originalToken };
+      const drawer = document.getElementById('translationDrawer');
+      const meaningEl = document.getElementById('drawerMeaning');
+      const saveButton = document.getElementById('saveWordBtn');
+      document.getElementById('drawerWord').innerText = originalToken;
+
+      const foundMeaning = Object.entries(currentStory.vocabulary || {})
+        .find(([key]) => key.toLowerCase() === cleanWord)?.[1];
+
+      if (foundMeaning) {
+        meaningEl.innerText = foundMeaning;
+        document.getElementById('drawerRoot').innerText = "";
+      } else {
+        meaningEl.innerText = "Toca para guardar y repasar";
+        document.getElementById('drawerRoot').innerText = "(glosario general)";
+      }
+
+      const isSaved = vocabBank.some(item => item.word.toLowerCase() === cleanWord);
+      saveButton.innerText = isSaved ? "✓ Guardada" : "+ Guardar";
+      saveButton.className = isSaved
+        ? "px-3 py-1.5 rounded-lg bg-emerald-500 text-slate-950 font-bold text-xs"
+        : "px-3 py-1.5 rounded-lg bg-sky-500 hover:bg-sky-400 text-slate-950 font-bold text-xs";
+
+      drawer.classList.remove('hidden');
+    }
+
+    function toggleSaveCurrentWord() {
+      if (!selectedToken) return;
+
+      const existingIndex = vocabBank.findIndex(item => item.word.toLowerCase() === selectedToken.clean);
+      if (existingIndex > -1) {
+        vocabBank.splice(existingIndex, 1);
+      } else {
+        vocabBank.push({
+          word: selectedToken.display,
+          meaning: document.getElementById('drawerMeaning').innerText,
+          date: new Date().toLocaleDateString()
+        });
+      }
+
+      localStorage.setItem('leelo_vocab', JSON.stringify(vocabBank));
+      updateVocabBadge();
+      loadStory(currentStory, document.getElementById('sourceTag').innerText);
+      handleWordClick(selectedToken.clean, selectedToken.display);
+    }
+
+    function updateVocabBadge() {
+      document.getElementById('vocabCount').innerText = vocabBank.length;
+    }
+
+    async function handleNextStory() {
+      const apiKey = localStorage.getItem('gemini_api_key');
+      const button = document.getElementById('nextStoryBtn');
+      const buttonText = document.getElementById('btnText');
+
+      if (!apiKey) {
+        showNextOfflineStory();
+        return;
+      }
+
+      try {
+        button.disabled = true;
+        buttonText.innerText = "Creando historia...";
+        const level = document.getElementById('levelSelect').value;
+        const genre = document.getElementById('genreSelect').value;
+
+        let vocabConstraint = "";
+        if (vocabBank.length > 0) {
+          const sample = [...vocabBank].sort(() => 0.5 - Math.random()).slice(0, 3);
+          vocabConstraint = `Naturally integrate these specific user vocabulary words into the story: [${sample.map(item => item.word).join(', ')}].`;
+        }
+
+        const prompt = `Write a short, engaging Spanish story for CEFR level ${level}.
+Genre: ${genre}.
+Length: 100 to 160 words.
+${vocabConstraint}
+
+Respond strictly in valid JSON matching this exact structure:
+{
+  "title": "Story title in Spanish",
+  "text": "The complete Spanish story text here...",
+  "vocabulary": { "palabra1": "root/infinitive : English meaning" },
+  "question": {
+    "prompt": "Comprehension question in Spanish?",
+    "options": ["Option 1", "Option 2", "Option 3"],
+    "correctIndex": 0
+  }
+}`;
+
+        const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${encodeURIComponent(apiKey)}`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            contents: [{ parts: [{ text: prompt }] }],
+            generationConfig: { responseMimeType: "application/json" }
+          })
+        });
+
+        const data = await response.json();
+        if (!response.ok) {
+          throw new Error(data.error?.message || 'No se pudo generar la historia');
+        }
+
+        const rawStory = data.candidates?.[0]?.content?.parts?.[0]?.text;
+        if (!rawStory) throw new Error('La respuesta de Gemini no contiene una historia');
+        const generatedStory = JSON.parse(rawStory);
+        if (!generatedStory.title || !generatedStory.text) throw new Error('La historia generada está incompleta');
+        loadStory(generatedStory, "Gemini Flash");
+      } catch (error) {
+        console.error("Gemini API error, falling back to offline:", error);
+        showNextOfflineStory();
+      } finally {
+        button.disabled = false;
+        buttonText.innerText = "Siguiente Historia ➔";
+      }
+    }
+
+    function showNextOfflineStory() {
+      currentOfflineIndex = (currentOfflineIndex + 1) % offlineLibrary.length;
+      loadStory(offlineLibrary[currentOfflineIndex], "Offline");
+    }
+
+    function openSettingsModal() {
+      document.getElementById('apiKeyInput').value = localStorage.getItem('gemini_api_key') || '';
+      document.getElementById('settingsModal').classList.replace('hidden', 'flex');
+    }
+
+    function closeSettingsModal() {
+      document.getElementById('settingsModal').classList.replace('flex', 'hidden');
+    }
+
+    function saveApiKey() {
+      const key = document.getElementById('apiKeyInput').value.trim();
+      if (key) localStorage.setItem('gemini_api_key', key);
+      else localStorage.removeItem('gemini_api_key');
+      closeSettingsModal();
+      alert(key ? "¡Clave guardada con éxito!" : "Clave eliminada. Modo offline activo.");
+    }
+
+    function openVocabModal() {
+      const list = document.getElementById('vocabList');
+      list.replaceChildren();
+      if (vocabBank.length === 0) {
+        const empty = document.createElement('p');
+        empty.className = "text-xs text-slate-500 italic py-4 text-center";
+        empty.innerText = "No has guardado palabras aún. Toca cualquier palabra en una historia para guardarla.";
+        list.appendChild(empty);
+      } else {
+        vocabBank.forEach((item, index) => {
+          const row = document.createElement('div');
+          row.className = "flex justify-between items-center bg-slate-800/60 p-2.5 rounded-xl border border-slate-700/50 text-xs";
+
+          const details = document.createElement('div');
+          const word = document.createElement('p');
+          word.className = "font-bold text-sky-400 text-sm capitalize";
+          word.innerText = item.word;
+          const meaning = document.createElement('p');
+          meaning.className = "text-slate-300";
+          meaning.innerText = item.meaning;
+          details.append(word, meaning);
+
+          const remove = document.createElement('button');
+          remove.type = 'button';
+          remove.className = "text-slate-500 hover:text-rose-400 p-1 text-sm";
+          remove.setAttribute('aria-label', `Eliminar ${item.word}`);
+          remove.innerText = "✕";
+          remove.onclick = () => removeVocabItem(index);
+
+          row.append(details, remove);
+          list.appendChild(row);
+        });
+      }
+      document.getElementById('vocabModal').classList.replace('hidden', 'flex');
+    }
+
+    function closeVocabModal() {
+      document.getElementById('vocabModal').classList.replace('flex', 'hidden');
+    }
+
+    function removeVocabItem(index) {
+      vocabBank.splice(index, 1);
+      localStorage.setItem('leelo_vocab', JSON.stringify(vocabBank));
+      updateVocabBadge();
+      openVocabModal();
+      loadStory(currentStory, document.getElementById('sourceTag').innerText);
+    }
+  </script>
+</body>
+</html>
 
