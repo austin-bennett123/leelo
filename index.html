@@ -76,19 +76,24 @@
       <div id="questionFeedback" class="text-xs mt-1.5 font-medium hidden"></div>
     </div>
 
-    <div id="translationDrawer" class="hidden mt-4 p-3 bg-slate-800/90 border border-sky-500/30 rounded-xl flex items-center justify-between" aria-live="polite">
-      <div>
+  </main>
+
+  <div id="translationDrawer" class="hidden fixed z-40 w-80 max-w-[calc(100vw-2rem)] max-h-[calc(100vh-1rem)] overflow-y-auto p-3 bg-slate-800 border border-sky-500/30 rounded-xl shadow-xl" role="dialog" aria-label="Traducción" aria-live="polite">
+    <div class="flex items-start justify-between gap-3">
+      <div class="min-w-0">
         <div class="flex items-baseline gap-2">
           <span id="drawerWord" class="font-bold text-sky-400 text-base capitalize"></span>
-          <span id="drawerRoot" class="text-xs text-slate-400 italic"></span>
         </div>
         <p id="drawerMeaning" class="text-sm text-slate-200 mt-0.5 font-medium"></p>
       </div>
-      <button type="button" id="saveWordBtn" onclick="toggleSaveCurrentWord()" class="px-3 py-1.5 rounded-lg bg-sky-500 hover:bg-sky-400 text-slate-950 font-bold text-xs">
-        + Guardar
-      </button>
+      <div class="flex shrink-0 items-center gap-1">
+        <button type="button" onclick="closeTranslationDrawer()" aria-label="Cerrar traducción" class="px-2 py-1.5 text-slate-400 hover:text-white text-xs">✕</button>
+        <button type="button" id="saveWordBtn" onclick="toggleSaveCurrentWord()" class="px-3 py-1.5 rounded-lg bg-sky-500 hover:bg-sky-400 text-slate-950 font-bold text-xs">
+          + Guardar
+        </button>
+      </div>
     </div>
-  </main>
+  </div>
 
   <footer class="w-full max-w-md pt-3 flex gap-2">
     <button type="button" id="nextStoryBtn" onclick="handleNextStory()" class="flex-1 py-3.5 px-4 rounded-xl bg-sky-500 hover:bg-sky-400 active:scale-[0.98] transition-all text-slate-950 font-bold text-base shadow-lg shadow-sky-500/20 flex items-center justify-center gap-2">
@@ -111,7 +116,7 @@
     <div class="bg-slate-900 border border-slate-800 rounded-2xl max-w-sm w-full p-5">
       <h3 id="settingsTitle" class="font-bold text-lg text-white mb-2">Configuración de Gemini</h3>
       <p class="text-xs text-slate-400 mb-4 leading-relaxed">
-        Pega tu API Key gratuita de <strong>Google AI Studio</strong> para historias ilimitadas generadas por IA que usen tus palabras guardadas. Si no tienes una, la app usará cuentos guardados offline.
+        Pega tu API Key gratuita de <strong>Google AI Studio</strong> para generar historias y traducir palabras que no estén en el glosario. Sin clave, la app usará cuentos guardados offline.
       </p>
       <input type="password" id="apiKeyInput" placeholder="AIzaSy..." autocomplete="off" class="w-full bg-slate-800 border border-slate-700 rounded-xl px-3 py-2 text-sm text-slate-100 outline-none mb-4 focus:border-sky-500">
       <div class="flex justify-end gap-2">
@@ -167,6 +172,7 @@
 
     let currentStory = null;
     let selectedToken = null;
+    let translationRequestId = 0;
     let vocabBank = readJson('leelo_vocab', []);
     let currentOfflineIndex = 0;
 
@@ -181,10 +187,22 @@
     window.addEventListener('DOMContentLoaded', () => {
       updateVocabBadge();
       loadStory(offlineLibrary[0], "Offline");
+      document.addEventListener('pointerdown', event => {
+        const target = event.target;
+        if (!(target instanceof Element) || target.closest('#translationDrawer, .word-token')) return;
+        closeTranslationDrawer();
+      });
+      document.addEventListener('keydown', event => {
+        if (event.key === 'Escape') closeTranslationDrawer();
+      });
+      window.addEventListener('scroll', repositionTranslationDrawer, true);
+      window.addEventListener('resize', repositionTranslationDrawer);
     });
 
     function loadStory(story, source = "Offline") {
       currentStory = story;
+      selectedToken = null;
+      translationRequestId++;
       document.getElementById('storyTitle').innerText = story.title;
       document.getElementById('sourceTag').innerText = source;
       document.getElementById('translationDrawer').classList.add('hidden');
@@ -209,12 +227,13 @@
           span.tabIndex = 0;
           span.setAttribute('role', 'button');
           const cleanWord = token.toLowerCase().replace(/[^a-záéíóúñü]/g, '');
+          span.dataset.cleanWord = cleanWord;
 
           if (vocabBank.some(item => item.word.toLowerCase() === cleanWord)) {
             span.classList.add('word-saved');
           }
 
-          const openWord = () => handleWordClick(cleanWord, token);
+          const openWord = () => handleWordClick(cleanWord, token, span);
           span.onclick = openWord;
           span.onkeydown = event => {
             if (event.key === 'Enter' || event.key === ' ') {
@@ -262,8 +281,8 @@
       });
     }
 
-    function handleWordClick(cleanWord, originalToken) {
-      selectedToken = { clean: cleanWord, display: originalToken };
+    async function handleWordClick(cleanWord, originalToken, anchor) {
+      selectedToken = { clean: cleanWord, display: originalToken, anchor };
       const drawer = document.getElementById('translationDrawer');
       const meaningEl = document.getElementById('drawerMeaning');
       const saveButton = document.getElementById('saveWordBtn');
@@ -271,13 +290,17 @@
 
       const foundMeaning = Object.entries(currentStory.vocabulary || {})
         .find(([key]) => key.toLowerCase() === cleanWord)?.[1];
+      const savedMeaning = vocabBank.find(item => item.word.toLowerCase() === cleanWord)?.meaning;
+      const meaning = foundMeaning || (savedMeaning === "Toca para guardar y repasar" ? '' : savedMeaning) || '';
+      const requestId = ++translationRequestId;
 
-      if (foundMeaning) {
-        meaningEl.innerText = foundMeaning;
-        document.getElementById('drawerRoot').innerText = "";
+      if (meaning) {
+        setDrawerTranslation(meaning);
       } else {
-        meaningEl.innerText = "Toca para guardar y repasar";
-        document.getElementById('drawerRoot').innerText = "(glosario general)";
+        setDrawerTranslation('');
+        meaningEl.innerText = localStorage.getItem('gemini_api_key')
+          ? "Buscando traducción..."
+          : "Traducción no disponible. Añade una clave de Gemini en Configuración.";
       }
 
       const isSaved = vocabBank.some(item => item.word.toLowerCase() === cleanWord);
@@ -287,18 +310,89 @@
         : "px-3 py-1.5 rounded-lg bg-sky-500 hover:bg-sky-400 text-slate-950 font-bold text-xs";
 
       drawer.classList.remove('hidden');
+      positionTranslationDrawer(anchor);
+
+      if (!meaning && localStorage.getItem('gemini_api_key')) {
+        try {
+          const translatedMeaning = await translateWord(cleanWord, anchor?.parentElement?.textContent || originalToken);
+          if (requestId !== translationRequestId || selectedToken?.clean !== cleanWord) return;
+          currentStory.vocabulary ||= {};
+          currentStory.vocabulary[cleanWord] = translatedMeaning;
+          setDrawerTranslation(translatedMeaning);
+          positionTranslationDrawer(anchor);
+        } catch (error) {
+          console.error("Word translation error:", error);
+          if (requestId === translationRequestId && selectedToken?.clean === cleanWord) {
+            meaningEl.innerText = "No se pudo traducir esta palabra. Inténtalo de nuevo.";
+          }
+        }
+      }
+    }
+
+    function setDrawerTranslation(meaning) {
+      const meaningEl = document.getElementById('drawerMeaning');
+      meaningEl.dataset.translation = meaning;
+      meaningEl.innerText = meaning;
+    }
+
+    async function translateWord(word, sentence) {
+      const apiKey = localStorage.getItem('gemini_api_key');
+      if (!apiKey) throw new Error('No hay una clave de Gemini configurada');
+
+      const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${encodeURIComponent(apiKey)}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          contents: [{ parts: [{ text: `Translate the Spanish word "${word}" into concise English. Use this sentence for context: "${sentence}". Return only the English translation, with no explanation or quotation marks.` }] }]
+        })
+      });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error?.message || 'No se pudo traducir la palabra');
+
+      const translation = data.candidates?.[0]?.content?.parts?.[0]?.text?.trim();
+      if (!translation) throw new Error('La respuesta de Gemini no contiene una traducción');
+      return translation.replace(/^["']|["']$/g, '');
+    }
+
+    function positionTranslationDrawer(anchor = selectedToken?.anchor) {
+      const drawer = document.getElementById('translationDrawer');
+      if (!anchor || drawer.classList.contains('hidden')) return;
+
+      const wordRect = anchor.getBoundingClientRect();
+      const drawerRect = drawer.getBoundingClientRect();
+      const margin = 8;
+      const left = Math.min(
+        Math.max(margin, wordRect.left + wordRect.width / 2 - drawerRect.width / 2),
+        window.innerWidth - drawerRect.width - margin
+      );
+      const top = wordRect.top >= drawerRect.height + margin
+        ? wordRect.top - drawerRect.height - margin
+        : Math.min(wordRect.bottom + margin, window.innerHeight - drawerRect.height - margin);
+      drawer.style.left = `${left}px`;
+      drawer.style.top = `${Math.max(margin, top)}px`;
+    }
+
+    function repositionTranslationDrawer() {
+      positionTranslationDrawer();
+    }
+
+    function closeTranslationDrawer() {
+      document.getElementById('translationDrawer').classList.add('hidden');
+      selectedToken = null;
+      translationRequestId++;
     }
 
     function toggleSaveCurrentWord() {
       if (!selectedToken) return;
+      const savedToken = selectedToken;
 
-      const existingIndex = vocabBank.findIndex(item => item.word.toLowerCase() === selectedToken.clean);
+      const existingIndex = vocabBank.findIndex(item => item.word.toLowerCase() === savedToken.clean);
       if (existingIndex > -1) {
         vocabBank.splice(existingIndex, 1);
       } else {
         vocabBank.push({
-          word: selectedToken.display,
-          meaning: document.getElementById('drawerMeaning').innerText,
+          word: savedToken.display,
+          meaning: document.getElementById('drawerMeaning').dataset.translation || '',
           date: new Date().toLocaleDateString()
         });
       }
@@ -306,7 +400,9 @@
       localStorage.setItem('leelo_vocab', JSON.stringify(vocabBank));
       updateVocabBadge();
       loadStory(currentStory, document.getElementById('sourceTag').innerText);
-      handleWordClick(selectedToken.clean, selectedToken.display);
+      const updatedAnchor = [...document.querySelectorAll('.word-token')]
+        .find(token => token.dataset.cleanWord === savedToken.clean);
+      handleWordClick(savedToken.clean, savedToken.display, updatedAnchor);
     }
 
     function updateVocabBadge() {
@@ -421,7 +517,7 @@ Respond strictly in valid JSON matching this exact structure:
           word.innerText = item.word;
           const meaning = document.createElement('p');
           meaning.className = "text-slate-300";
-          meaning.innerText = item.meaning;
+          meaning.innerText = item.meaning || "Sin traducción";
           details.append(word, meaning);
 
           const remove = document.createElement('button');
@@ -452,4 +548,3 @@ Respond strictly in valid JSON matching this exact structure:
   </script>
 </body>
 </html>
-
